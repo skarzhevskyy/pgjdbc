@@ -72,7 +72,11 @@ public class DaylightSavingJDBC {
             testDB = DBType.HSQL;
         }
 
-        ConnectionPoolProvider connectionPoolProvider = ConnectionPoolProvider.c3p0;
+        ConnectionPoolProvider connectionPoolProvider;
+
+        //connectionPoolProvider = ConnectionPoolProvider.c3p0;
+        connectionPoolProvider = ConnectionPoolProvider.none;
+
         if (arguments.contains("-c3p0")) {
             connectionPoolProvider = ConnectionPoolProvider.c3p0;
         } else if (arguments.contains("-dbcp")) {
@@ -82,6 +86,7 @@ public class DaylightSavingJDBC {
         }
 
         System.out.println("DB type: " + testDB + " ConnectionPool:" + connectionPoolProvider);
+        System.out.println(System.getProperty("java.version") + " " + System.getProperty("java.vm.name"));
 
         String driverClass;
         String url;
@@ -136,14 +141,14 @@ public class DaylightSavingJDBC {
                 init = false;
                 try {
                     con.createStatement().executeUpdate(
-                            "CREATE TABLE test(id SERIAL NOT NULL, name varchar(500), dval timestamp, CONSTRAINT TEST_PK PRIMARY KEY (id))");
+                            "CREATE TABLE test2(id SERIAL NOT NULL, name varchar(500), trc varchar(500), dval timestamp, CONSTRAINT TEST_PK PRIMARY KEY (id))");
                 } catch (SQLException e) {
                     if (!e.getMessage().contains("already exists")) {
                         throw e;
                     }
                 }
             } else {
-                con.createStatement().executeUpdate("DELETE FROM test");
+                con.createStatement().executeUpdate("DELETE FROM test2");
             }
             break;
         }
@@ -159,7 +164,7 @@ public class DaylightSavingJDBC {
 
         // Save event in day when daylight saving change happened 
         {
-            PreparedStatement stmt = con.prepareStatement("INSERT INTO test (name, dval)  VALUES (?, ?)");
+            PreparedStatement stmt = con.prepareStatement("INSERT INTO test2 (name, dval)  VALUES (?, ?)");
 
             stmt.setString(1, uniqueName);
             Date date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH).parse(dateTimeInSaylightSavingDay);
@@ -193,21 +198,26 @@ public class DaylightSavingJDBC {
             poolableConnectionFactory.setPoolStatements(true); //   <-------------------- this makes the difference  (false is OK)
             poolableConnectionFactory.setMaxOpenPrepatedStatements(30);
 
-            connectionPool = new GenericObjectPool<>(poolableConnectionFactory);
+            connectionPool = new GenericObjectPool<PoolableConnection>(poolableConnectionFactory);
             connectionPool.setMaxTotal(3);
 
             poolableConnectionFactory.setPool(connectionPool);
             dataSourceDBCP = new PoolingDataSource<PoolableConnection>(connectionPool);
         }
 
+        PreparedStatement reuseStmt = null;
+
         try {
-            for (int i = 0; i <= 20; i++) {
+            for (int i = 1; i <= 21; i++) {
 
                 Connection con2 = null;
+                boolean reuse = false;
 
                 switch (connectionPoolProvider) {
                 case none:
                     con2 = con; // <-------------  Not pooled connection works fine!
+                    reuse = true;
+
                     //con2 = DriverManager.getConnection(url, user, password); // <-------------  Driver Managed connection works fine!
                     break;
                 case c3p0:
@@ -218,9 +228,16 @@ public class DaylightSavingJDBC {
                     break;
                 }
 
-                String sql = "SELECT dval FROM test  WHERE name = ?";
-                PreparedStatement stmt = con2.prepareStatement(sql);
+                String sql = "SELECT dval FROM test2  WHERE name = ? and trc is null or trc = ?";
+                PreparedStatement stmt;
+                if (reuse && (reuseStmt != null)) {
+                    stmt = reuseStmt;
+                } else {
+                    stmt = con2.prepareStatement(sql);
+                }
+                reuseStmt = stmt;
                 stmt.setString(1, uniqueName);
+                stmt.setString(2, String.valueOf(i));
 
                 ResultSet rs = stmt.executeQuery();
                 try {
@@ -244,6 +261,9 @@ public class DaylightSavingJDBC {
                     }
                 } finally {
                     rs.close();
+                    if (!reuse) {
+                        stmt.close();
+                    }
                 }
 
                 if (con2 != con) { // if pooled connection
