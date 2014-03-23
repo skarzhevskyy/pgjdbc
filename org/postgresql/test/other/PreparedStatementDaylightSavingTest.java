@@ -63,7 +63,7 @@ public class PreparedStatementDaylightSavingTest extends TestCase {
     }
 
     public void testDateTimeInSaylightSavingDayFromTable() throws SQLException {
-        String sql = "SELECT val FROM dls1test WHERE name = ?";
+        String sql = "SELECT val, val::text AS val_text FROM dls1test WHERE name = ?";
         PreparedStatement stmt = _conn.prepareStatement(sql);
 
         for (int i = 1; i <= 20; i++) {
@@ -76,14 +76,16 @@ public class PreparedStatementDaylightSavingTest extends TestCase {
                     java.sql.Timestamp value;
 
                     value = rs.getTimestamp("val");
+                    String text = rs.getString("val_text");
                     //value = rs.getTimestamp("val", Calendar.getInstance()); // <-- this changes nothing
 
                     Calendar c = Calendar.getInstance();
                     c.setTime(value);
 
                     //System.out.println(value.getTimezoneOffset()); // this prints the same value
+                    // System.out.println(rs.getMetaData().getColumnType(1));
 
-                    assertEquals("try# " + i + " to verify hour of " + value, testHour, c.get(Calendar.HOUR_OF_DAY));
+                    assertEquals("try# " + i + " to verify hour of Timestamp " + value + "; where val::text " + text, testHour, c.get(Calendar.HOUR_OF_DAY));
 
                 } else {
                     throw new Error();
@@ -91,7 +93,33 @@ public class PreparedStatementDaylightSavingTest extends TestCase {
             } finally {
                 rs.close();
             }
+        }
+    }
 
+    public void testDateTimeInSaylightSavingDayFromNoTable() throws SQLException {
+        String sql = "SELECT ('2014-03-09 06:21:28 EDT'::timestamp) as val";
+        PreparedStatement stmt = _conn.prepareStatement(sql);
+
+        for (int i = 1; i <= 20; i++) {
+            ResultSet rs = stmt.executeQuery();
+            try {
+                if (rs.next()) {
+
+                    java.sql.Timestamp value;
+
+                    value = rs.getTimestamp("val");
+
+                    Calendar c = Calendar.getInstance();
+                    c.setTime(value);
+
+                    assertEquals("try# " + i + " to verify hour of Timestamp " + value, testHour, c.get(Calendar.HOUR_OF_DAY));
+
+                } else {
+                    throw new Error();
+                }
+            } finally {
+                rs.close();
+            }
         }
     }
 }
